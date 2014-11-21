@@ -249,6 +249,8 @@ int smk_netlbl_mls(int, char *, struct netlbl_lsm_secattr *, int);
 struct smack_known *smk_import_entry(const char *, int);
 void smk_insert_entry(struct smack_known *skp);
 struct smack_known *smk_find_entry(const char *);
+char *smk_find_label_name(struct smack_known *skp);
+struct smack_known *smk_get_label(const char *string, int len, bool import);
 
 /*
  * Shared data.

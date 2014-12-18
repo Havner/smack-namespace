@@ -49,4 +49,6 @@ config SECURITY_SMACK_NS
 	  This enables Smack namespace that makes it possible to map
 	  specific labels within user namespace (analogously to mapping
 	  UIDs) and to gain MAC capabilities over them.
+	  Documentation is availabile here:
+	  Documentation/security/Smack-namespace.txt
 	  If you are unsure how to answer this question, answer N.

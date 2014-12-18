@@ -742,7 +742,6 @@ void do_exit(long code)
 	exit_fs(tsk);
 	if (group_dead)
 		disassociate_ctty(1);
-	exit_task_namespaces(tsk);
 	exit_task_work(tsk);
 	exit_thread();
 
@@ -763,6 +762,13 @@ void do_exit(long code)
 
 	TASKS_RCU(tasks_rcu_i = __srcu_read_lock(&tasks_rcu_exit_srcu));
 	exit_notify(tsk, group_dead);
+
+	/*
+	 * This should be after all things that potentially require
+	 * process's namespaces (e.g. capability checks).
+	 */
+	exit_task_namespaces(tsk);
+
 	proc_exit_connector(tsk);
 #ifdef CONFIG_NUMA
 	task_lock(tsk);

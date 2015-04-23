@@ -2529,6 +2529,57 @@ static const struct file_operations proc_setgroups_operations = {
 };
 #endif /* CONFIG_USER_NS */
 
+#ifdef CONFIG_SECURITY_SMACK_NS
+static int proc_smack_map_open(struct inode *inode, struct file *file)
+{
+	struct user_namespace *ns = NULL;
+	struct task_struct *task;
+	struct seq_file *seq;
+	int ret = -EINVAL;
+
+	task = get_proc_task(inode);
+	if (task) {
+		rcu_read_lock();
+		ns = get_user_ns(task_cred_xxx(task, user_ns));
+		rcu_read_unlock();
+		put_task_struct(task);
+	}
+	if (!ns)
+		goto err;
+
+	ret = seq_open(file, &proc_smack_map_seq_operations);
+	if (ret)
+		goto err_put_ns;
+
+	seq = file->private_data;
+	seq->private = ns;
+
+	return 0;
+
+err_put_ns:
+	put_user_ns(ns);
+err:
+	return ret;
+}
+
+static int proc_smack_map_release(struct inode *inode, struct file *file)
+{
+	struct seq_file *seq = file->private_data;
+	struct user_namespace *ns = seq->private;
+
+	put_user_ns(ns);
+	return seq_release(inode, file);
+}
+
+static const struct file_operations proc_smack_map_operations = {
+	.open		= proc_smack_map_open,
+	.write		= proc_smack_map_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= proc_smack_map_release,
+};
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 static int proc_pid_personality(struct seq_file *m, struct pid_namespace *ns,
 				struct pid *pid, struct task_struct *task)
 {
@@ -2636,6 +2687,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("gid_map",    S_IRUGO|S_IWUSR, proc_gid_map_operations),
 	REG("projid_map", S_IRUGO|S_IWUSR, proc_projid_map_operations),
 	REG("setgroups",  S_IRUGO|S_IWUSR, proc_setgroups_operations),
+#endif
+#ifdef CONFIG_SECURITY_SMACK_NS
+	REG("smack_map",    S_IRUGO|S_IWUSR, proc_smack_map_operations),
 #endif
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	REG("timers",	  S_IRUGO, proc_timers_operations),
@@ -2981,6 +3035,9 @@ static const struct pid_entry tid_base_stuff[] = {
 	REG("gid_map",    S_IRUGO|S_IWUSR, proc_gid_map_operations),
 	REG("projid_map", S_IRUGO|S_IWUSR, proc_projid_map_operations),
 	REG("setgroups",  S_IRUGO|S_IWUSR, proc_setgroups_operations),
+#endif
+#ifdef CONFIG_SECURITY_SMACK_NS
+	REG("smack_map",    S_IRUGO|S_IWUSR, proc_smack_map_operations),
 #endif
 };
 

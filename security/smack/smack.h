@@ -21,6 +21,7 @@
 #include <linux/list.h>
 #include <linux/rculist.h>
 #include <linux/lsm_audit.h>
+#include <linux/user_namespace.h>
 
 /*
  * Smack labels were limited to 23 characters for a long time.
@@ -59,7 +60,35 @@ struct smack_known {
 	struct netlbl_lsm_secattr	smk_netlabel;	/* on wire labels */
 	struct list_head		smk_rules;	/* access rules */
 	struct mutex			smk_rules_lock;	/* lock for rules */
+#ifdef CONFIG_SECURITY_SMACK_NS
+	struct list_head		smk_mapped;	/* namespaced labels */
+	struct mutex			smk_mapped_lock;
+#endif /* CONFIG_SECURITY_SMACK_NS */
 };
+
+#ifdef CONFIG_SECURITY_SMACK_NS
+
+/*
+ * User namespace security pointer content.
+ */
+struct smack_ns {
+	struct list_head		smk_mapped;	/* namespaced labels */
+	struct mutex			smk_mapped_lock;
+};
+
+/*
+ * A single entry for a namespaced/mapped label.
+ */
+struct smack_known_ns {
+	struct list_head	smk_list_known;
+	struct list_head	smk_list_ns;
+	struct user_namespace	*smk_ns;
+	char			*smk_mapped;
+	struct smack_known	*smk_unmapped;
+	bool			smk_allocated;
+};
+
+#endif /* CONFIG_SECURITY_SMACK_NS */
 
 /*
  * Maximum number of bytes for the levels in a CIPSO IP option.
@@ -245,13 +274,24 @@ int smk_tskacc(struct task_struct *, struct smack_known *,
 	       u32, struct smk_audit_info *);
 int smk_curacc(struct smack_known *, u32, struct smk_audit_info *);
 struct smack_known *smack_from_secid(const u32);
-char *smk_parse_smack(const char *string, int len);
+char *smk_parse_smack(const char *string, int len, bool *allocated);
 int smk_netlbl_mls(int, char *, struct netlbl_lsm_secattr *, int);
 struct smack_known *smk_import_entry(const char *, int);
 void smk_insert_entry(struct smack_known *skp);
 struct smack_known *smk_find_entry(const char *);
 char *smk_find_label_name(struct smack_known *skp);
 struct smack_known *smk_get_label(const char *string, int len, bool import);
+
+/*
+ * These functions are in smack_ns.c
+ */
+#ifdef CONFIG_SECURITY_SMACK_NS
+struct user_namespace *smk_find_mapped_ns(struct user_namespace *ns);
+struct smack_known_ns *smk_find_mapped(struct smack_known *skp,
+				       struct user_namespace *ns);
+struct smack_known *smk_find_unmapped(const char *string, int len,
+				      struct user_namespace *ns);
+#endif /* CONFIG_SECURITY_SMACK_NS */
 
 /*
  * Shared data.

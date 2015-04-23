@@ -41,6 +41,7 @@
 #include <linux/msg.h>
 #include <linux/shm.h>
 #include <linux/binfmts.h>
+#include <linux/user_namespace.h>
 #include "smack.h"
 
 #define TRANS_TRUE	"TRUE"
@@ -4165,6 +4166,53 @@ static void smack_audit_rule_free(void *vrule)
 
 #endif /* CONFIG_AUDIT */
 
+#ifdef CONFIG_SECURITY_SMACK_NS
+
+static inline int smack_userns_create(struct user_namespace *ns)
+{
+	struct smack_ns *snsp;
+
+	snsp = kzalloc(sizeof(*snsp), GFP_KERNEL);
+	if (snsp == NULL)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&snsp->smk_mapped);
+	mutex_init(&snsp->smk_mapped_lock);
+
+	ns->security = snsp;
+	return 0;
+}
+
+static inline void smack_userns_free(struct user_namespace *ns)
+{
+	struct smack_ns *snsp = ns->security;
+	struct smack_known *skp;
+	struct smack_known_ns *sknp, *n;
+
+	list_for_each_entry_safe(sknp, n, &snsp->smk_mapped, smk_list_ns) {
+		skp = sknp->smk_unmapped;
+
+		mutex_lock(&skp->smk_mapped_lock);
+		list_del_rcu(&sknp->smk_list_known);
+		if (sknp->smk_allocated)
+			kfree(sknp->smk_mapped);
+		kfree(sknp);
+		mutex_unlock(&skp->smk_mapped_lock);
+
+		list_del(&sknp->smk_list_ns);
+	}
+
+	kfree(snsp);
+}
+
+static inline int smack_userns_setns(struct nsproxy *nsproxy,
+				     struct user_namespace *ns)
+{
+	return 0;
+}
+
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 /**
  * smack_ismaclabel - check if xattr @name references a smack MAC label
  * @name: Full xattr name to check.
@@ -4376,6 +4424,13 @@ struct security_hook_list smack_hooks[] = {
 	LSM_HOOK_INIT(audit_rule_free, smack_audit_rule_free),
 #endif /* CONFIG_AUDIT */
 
+ /* Namespace hooks */
+#ifdef CONFIG_SECURITY_SMACK_NS
+	LSM_HOOK_INIT(userns_create, smack_userns_create),
+	LSM_HOOK_INIT(userns_free, smack_userns_free),
+	LSM_HOOK_INIT(userns_setns, smack_userns_setns),
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 	LSM_HOOK_INIT(ismaclabel, smack_ismaclabel),
 	LSM_HOOK_INIT(secid_to_secctx, smack_secid_to_secctx),
 	LSM_HOOK_INIT(secctx_to_secid, smack_secctx_to_secid),
@@ -4388,6 +4443,27 @@ struct security_hook_list smack_hooks[] = {
 
 static __init void init_smack_known_list(void)
 {
+#ifdef CONFIG_SECURITY_SMACK_NS
+	/*
+	 * Initialize mapped list locks
+	 */
+	mutex_init(&smack_known_huh.smk_mapped_lock);
+	mutex_init(&smack_known_hat.smk_mapped_lock);
+	mutex_init(&smack_known_floor.smk_mapped_lock);
+	mutex_init(&smack_known_star.smk_mapped_lock);
+	mutex_init(&smack_known_invalid.smk_mapped_lock);
+	mutex_init(&smack_known_web.smk_mapped_lock);
+	/*
+	 * Initialize mapped lists
+	 */
+	INIT_LIST_HEAD(&smack_known_huh.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_hat.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_star.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_floor.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_invalid.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_web.smk_mapped);
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 	/*
 	 * Initialize rule list locks
 	 */

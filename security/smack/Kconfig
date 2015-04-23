@@ -40,3 +40,13 @@ config SECURITY_SMACK_NETFILTER
 	  This enables security marking of network packets using
 	  Smack labels.
 	  If you are unsure how to answer this question, answer N.
+
+config SECURITY_SMACK_NS
+	bool "Smack namespace"
+	depends on SECURITY_SMACK
+	depends on USER_NS
+	help
+	  This enables Smack namespace that makes it possible to map
+	  specific labels within user namespace (analogously to mapping
+	  UIDs) and to gain MAC capabilities over them.
+	  If you are unsure how to answer this question, answer N.

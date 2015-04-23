@@ -76,6 +76,11 @@ extern ssize_t proc_projid_map_write(struct file *, const char __user *, size_t,
 extern ssize_t proc_setgroups_write(struct file *, const char __user *, size_t, loff_t *);
 extern int proc_setgroups_show(struct seq_file *m, void *v);
 extern bool userns_may_setgroups(const struct user_namespace *ns);
+#ifdef CONFIG_SECURITY_SMACK_NS
+extern const struct seq_operations proc_smack_map_seq_operations;
+ssize_t proc_smack_map_write(struct file *file, const char __user *buf,
+			     size_t size, loff_t *ppos);
+#endif /* CONFIG_SECURITY_SMACK_NS */
 #else
 
 static inline struct user_namespace *get_user_ns(struct user_namespace *ns)

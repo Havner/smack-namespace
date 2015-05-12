@@ -332,18 +332,73 @@ static inline struct smack_known *smk_of_current(void)
 }
 
 /*
- * Is the task privileged and allowed to be privileged
- * by the onlycap rule.
+ * Internal smack capability check complimentary to the
+ * set of kernel capable() and has_capability() functions
+ *
+ * For a capability in smack related checks to be effective it needs to:
+ * - have empty onlycap or the current label be the same as onlycap
+ * - be in the initial user ns
  */
-static inline int smack_privileged(int cap)
+static inline int smack_capability_allowed(struct smack_known *skp,
+					   struct user_namespace *user_ns)
+{
+	if (user_ns != &init_user_ns)
+		return 0;
+
+	if (smack_onlycap != NULL && smack_onlycap != skp)
+		return 0;
+
+	return 1;
+}
+
+/*
+ * Is the task privileged in a namespace and allowed to be privileged
+ * by additional smack rules.
+ */
+static inline int smack_has_ns_privilege(struct task_struct *task,
+					 struct user_namespace *user_ns,
+					 int cap)
+{
+	struct smack_known *skp = smk_of_task_struct(task);
+
+	if (!has_ns_capability(task, user_ns, cap))
+		return 0;
+	if (smack_capability_allowed(skp, user_ns))
+		return 1;
+	return 0;
+}
+
+/*
+ * Is the task privileged and allowed to be privileged
+ * by additional smack rules.
+ */
+static inline int smack_has_privilege(struct task_struct *task, int cap)
+{
+	return smack_has_ns_privilege(task, &init_user_ns, cap);
+}
+
+/*
+ * Is the current task privileged in a namespace and allowed to be privileged
+ * by additional smack rules.
+ */
+static inline int smack_ns_privileged(struct user_namespace *user_ns, int cap)
 {
 	struct smack_known *skp = smk_of_current();
 
-	if (!capable(cap))
+	if (!ns_capable(user_ns, cap))
 		return 0;
-	if (smack_onlycap == NULL || smack_onlycap == skp)
+	if (smack_capability_allowed(skp, user_ns))
 		return 1;
 	return 0;
+}
+
+/*
+ * Is the current task privileged and allowed to be privileged
+ * by additional smack rules.
+ */
+static inline int smack_privileged(int cap)
+{
+	return smack_ns_privileged(&init_user_ns, cap);
 }
 
 /*

@@ -94,7 +94,7 @@ static struct smack_known *__smk_find_unmapped(const char *string, int len,
 	struct smack_known *skp = NULL;
 	struct smack_known_ns *sknp;
 	char *smack;
-	bool allocated = false;
+	bool allocated;
 
 	if (ns == NULL)
 		return NULL;
@@ -432,6 +432,8 @@ ssize_t proc_label_map_write(struct task_struct *p, const struct cred *f_cred,
 			ret = PTR_ERR(sknp);
 			goto out;
 		}
+
+		pr_warn("%s -> %s\n", tok[0], tok[1]);
 	}
 
 	ret = size;

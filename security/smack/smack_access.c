@@ -167,6 +167,7 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 		if (subject == &smack_known_hat)
 			goto out_audit;
 	}
+
 	/*
 	 * Beyond here an explicit relationship is required.
 	 * If the requested access is contained in the available
@@ -183,6 +184,7 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 		rc = -EACCES;
 		goto out_audit;
 	}
+
 #ifdef CONFIG_SECURITY_SMACK_BRINGUP
 	/*
 	 * Return a positive value if using bringup mode.
@@ -225,10 +227,10 @@ out_audit:
  * non zero otherwise. It allows that the task may have the capability
  * to override the rules.
  */
-int smk_tskacc(struct task_smack *tsp, struct smack_known *obj_known,
+int smk_tskacc(struct task_struct *task, struct smack_known *obj_known,
 	       u32 mode, struct smk_audit_info *a)
 {
-	struct smack_known *sbj_known = smk_of_task(tsp);
+	struct smack_known *sbj_known = smk_of_task_struct(task);
 	int may;
 	int rc;
 
@@ -237,13 +239,19 @@ int smk_tskacc(struct task_smack *tsp, struct smack_known *obj_known,
 	 */
 	rc = smk_access(sbj_known, obj_known, mode, NULL);
 	if (rc >= 0) {
+		struct task_smack *tsp;
+
 		/*
 		 * If there is an entry in the task's rule list
 		 * it can further restrict access.
 		 */
+		rcu_read_lock();
+		tsp = __task_cred(task)->security;
 		may = smk_access_entry(sbj_known->smk_known,
 				       obj_known->smk_known,
 				       &tsp->smk_rules);
+		rcu_read_unlock();
+
 		if (may < 0)
 			goto out_audit;
 		if ((mode & may) == mode)
@@ -280,9 +288,7 @@ out_audit:
 int smk_curacc(struct smack_known *obj_known,
 	       u32 mode, struct smk_audit_info *a)
 {
-	struct task_smack *tsp = current_security();
-
-	return smk_tskacc(tsp, obj_known, mode, a);
+	return smk_tskacc(current, obj_known, mode, a);
 }
 
 #ifdef CONFIG_AUDIT
@@ -456,7 +462,7 @@ char *smk_parse_smack(const char *string, int len)
 	int i;
 
 	if (len <= 0)
-		len = strlen(string) + 1;
+		len = strlen(string);
 
 	/*
 	 * Reserve a leading '-' as an indicator that

@@ -518,8 +518,9 @@ static int apparmor_getprocattr(struct task_struct *task, char *name,
 	return error;
 }
 
-static int apparmor_setprocattr(struct task_struct *task, char *name,
-				void *value, size_t size)
+static int apparmor_setprocattr(struct task_struct *task,
+				const struct cred *f_cred,
+				char *name, void *value, size_t size)
 {
 	struct common_audit_data sa;
 	struct apparmor_audit_data aad = {0,};

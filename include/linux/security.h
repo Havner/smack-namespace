@@ -348,7 +348,8 @@ void security_d_instantiate(struct dentry *dentry, struct inode *inode);
 int security_getprocattr_seq(struct task_struct *p, const char *name,
 			     const struct seq_operations **ops);
 int security_getprocattr(struct task_struct *p, char *name, char **value);
-int security_setprocattr(struct task_struct *p, char *name, void *value, size_t size);
+int security_setprocattr(struct task_struct *p, const struct cred *f_cred,
+			 char *name, void *value, size_t size);
 int security_netlink_send(struct sock *sk, struct sk_buff *skb);
 int security_ismaclabel(const char *name);
 int security_secid_to_secctx(u32 secid, char **secdata, u32 *seclen);
@@ -1071,7 +1072,9 @@ static inline int security_getprocattr(struct task_struct *p, char *name, char *
 	return -EINVAL;
 }
 
-static inline int security_setprocattr(struct task_struct *p, char *name, void *value, size_t size)
+static inline int security_setprocattr(struct task_struct *p,
+				       const struct cred *f_cred,
+				       char *name, void *value, size_t size)
 {
 	return -EINVAL;
 }

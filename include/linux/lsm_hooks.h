@@ -1220,6 +1220,20 @@
  *	Return 0 if @name is to be handled by seq, EOPNOTSUPP if getprocattr()
  *	should be used. Other errors will be passed to user-space.
  *
+ * @getprocattr:
+ *	Get a value of a proc security attribute in /proc/$PID/attr/.
+ *	@p a task associated with the proc file.
+ *	@name a name of the file in question.
+ *	@value a pointer where to return the attribute's value.
+ *
+ * @setprocattr:
+ *	Set a value of a proc security attribute in /proc/$PID/attr/.
+ *	@p a task associated with the proc file.
+ *	@f_cred credentials of a file's opener.
+ *	@name a name of the file in question.
+ *	@value a pointer where a value to set is kept.
+ *	@size a number of bytes to read from the @value pointer.
+ *
  * @secid_to_secctx:
  *	Convert secid to security context.  If secdata is NULL the length of
  *	the result will be returned in seclen, but no secdata will be returned.
@@ -1540,8 +1554,8 @@ union security_list_options {
 	int (*getprocattr_seq)(struct task_struct *p, const char *name,
 			       const struct seq_operations **ops);
 	int (*getprocattr)(struct task_struct *p, char *name, char **value);
-	int (*setprocattr)(struct task_struct *p, char *name, void *value,
-				size_t size);
+	int (*setprocattr)(struct task_struct *p, const struct cred *f_cred,
+			   char *name, void *value, size_t size);
 	int (*ismaclabel)(const char *name);
 	int (*secid_to_secctx)(u32 secid, char **secdata, u32 *seclen);
 	int (*secctx_to_secid)(const char *secdata, u32 seclen, u32 *secid);

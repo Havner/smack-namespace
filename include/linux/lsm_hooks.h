@@ -349,6 +349,11 @@
  *	Check permission before setting the extended attributes
  *	@value identified by @name for @dentry.
  *	Return 0 if permission is granted.
+ * @inode_pre_setxattr:
+ *	Be able to do some operation before setting the @value identified
+ *	by @name on the filesystem. Replacing the @value and its @size is
+ *	possible. Useful for mapped values. Set @alloc to true if @value
+ *	needs to be kfreed afterwards.
  * @inode_post_setxattr:
  *	Update inode security field after successful setxattr operation.
  *	@value identified by @name for @dentry.
@@ -1448,6 +1453,9 @@ union security_list_options {
 	int (*inode_getattr)(const struct path *path);
 	int (*inode_setxattr)(struct dentry *dentry, const char *name,
 				const void *value, size_t size, int flags);
+	int (*inode_pre_setxattr)(struct dentry *dentry, const char *name,
+				  const void **value, size_t *size,
+				  int flags, bool *alloc);
 	void (*inode_post_setxattr)(struct dentry *dentry, const char *name,
 					const void *value, size_t size,
 					int flags);
@@ -1730,6 +1738,7 @@ struct security_hook_heads {
 	struct list_head inode_setattr;
 	struct list_head inode_getattr;
 	struct list_head inode_setxattr;
+	struct list_head inode_pre_setxattr;
 	struct list_head inode_post_setxattr;
 	struct list_head inode_getxattr;
 	struct list_head inode_listxattr;

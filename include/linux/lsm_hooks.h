@@ -1261,6 +1261,23 @@
  *	audit_rule_init.
  *	@rule contains the allocated rule
  *
+ * @userns_create:
+ *	Allocates and fills the security part of a new user namespace.
+ *	@ns points to a newly created user namespace.
+ *	Returns 0 or an error code.
+ *
+ * @userns_free:
+ *	Deallocates the security part of a user namespace.
+ *	@ns points to a user namespace about to be destroyed.
+ *
+ * @userns_setns:
+ *	Run during a setns syscall to add a process to an already existing
+ *	user namespace. Returning failure here will block the operation
+ *	requested from userspace (setns() with CLONE_NEWUSER).
+ *	@nsproxy contains nsproxy to which the user namespace will be assigned.
+ *	@ns contains user namespace that is to be incorporated to the nsproxy.
+ *	Returns 0 or an error code.
+ *
  * @inode_notifysecctx:
  *	Notify the security module of what the security context of an inode
  *	should be.  Initializes the incore security context managed by the
@@ -1613,6 +1630,12 @@ union security_list_options {
 				struct audit_context *actx);
 	void (*audit_rule_free)(void *lsmrule);
 #endif /* CONFIG_AUDIT */
+
+#ifdef CONFIG_USER_NS
+	int (*userns_create)(struct user_namespace *ns);
+	void (*userns_free)(struct user_namespace *ns);
+	int (*userns_setns)(struct nsproxy *nsproxy, struct user_namespace *ns);
+#endif /* CONFIG_USER_NS */
 };
 
 struct security_hook_heads {
@@ -1824,6 +1847,11 @@ struct security_hook_heads {
 	struct list_head audit_rule_match;
 	struct list_head audit_rule_free;
 #endif /* CONFIG_AUDIT */
+#ifdef CONFIG_USER_NS
+	struct list_head userns_create;
+	struct list_head userns_free;
+	struct list_head userns_setns;
+#endif /* CONFIG_USER_NS */
 };
 
 /*

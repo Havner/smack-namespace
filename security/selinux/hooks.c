@@ -5603,7 +5603,7 @@ invalid:
 	return -EINVAL;
 }
 
-static int selinux_setprocattr(struct task_struct *p,
+static int selinux_setprocattr(struct task_struct *p, const struct cred *f_cred,
 			       char *name, void *value, size_t size)
 {
 	struct task_security_struct *tsec;

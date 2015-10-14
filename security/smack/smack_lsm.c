@@ -42,6 +42,7 @@
 #include <linux/shm.h>
 #include <linux/binfmts.h>
 #include <linux/parser.h>
+#include <linux/user_namespace.h>
 #include "smack.h"
 
 #define TRANS_TRUE	"TRUE"
@@ -3496,6 +3497,27 @@ unlockandout:
 }
 
 /**
+ * smack_getprocattr_seq - Smack process attribute access through seq
+ * @p: the object task
+ * @name: the name of the attribute in /proc/.../attr/
+ * @ops: out, seq_operations to handle @name
+ *
+ * Returns 0 if @name is to be handled by seq, error otherwise.
+ */
+int smack_getprocattr_seq(struct task_struct *p, const char *name,
+			  const struct seq_operations **ops)
+{
+#ifdef CONFIG_SECURITY_SMACK_NS
+	if (strcmp(name, "label_map") == 0) {
+		*ops = &proc_label_map_seq_operations;
+		return 0;
+	}
+#endif
+
+	return -EOPNOTSUPP;
+}
+
+/**
  * smack_getprocattr - Smack process attribute access
  * @p: the object task
  * @name: the name of the attribute in /proc/.../attr
@@ -3527,9 +3549,8 @@ static int smack_getprocattr(struct task_struct *p, char *name, char **value)
 }
 
 /**
- * smack_setprocattr - Smack process attribute setting
+ * proc_current_write - Smack "current" process attribute setting
  * @p: the object task
- * @name: the name of the attribute in /proc/.../attr
  * @value: the value to set
  * @size: the size of the value
  *
@@ -3538,8 +3559,7 @@ static int smack_getprocattr(struct task_struct *p, char *name, char **value)
  *
  * Returns the length of the smack label or an error code
  */
-static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
-			     char *name, void *value, size_t size)
+static int proc_current_write(struct task_struct *p, void *value, size_t size)
 {
 	struct task_smack *tsp;
 	struct cred *new;
@@ -3556,9 +3576,6 @@ static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
 		return -EPERM;
 
 	if (value == NULL || size == 0 || size >= SMK_LONGLABEL)
-		return -EINVAL;
-
-	if (strcmp(name, "current") != 0)
 		return -EINVAL;
 
 	skp = smk_get_label(value, size, true);
@@ -3580,6 +3597,33 @@ static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
 
 	commit_creds(new);
 	return size;
+}
+
+/**
+ * smack_setprocattr - Smack process attribute setting
+ * @p: the object task
+ * @cred: the credentials of the file's opener
+ * @name: the name of the attribute in /proc/.../attr
+ * @value: the value to set
+ * @size: the size of the value
+ *
+ * Sets the proc attribute
+ *
+ * Returns the length of the written data or an error code
+ */
+static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
+			     char *name, void *value, size_t size)
+{
+#ifdef CONFIG_SECURITY_SMACK_NS
+	if (strcmp(name, "label_map") == 0)
+		return proc_label_map_write(p, f_cred, value, size);
+#endif
+
+	if (strcmp(name, "current") == 0)
+		return proc_current_write(p, value, size);
+
+	return -EINVAL;
+
 }
 
 /**
@@ -4434,6 +4478,53 @@ static void smack_audit_rule_free(void *vrule)
 
 #endif /* CONFIG_AUDIT */
 
+#ifdef CONFIG_SECURITY_SMACK_NS
+
+static inline int smack_userns_create(struct user_namespace *ns)
+{
+	struct smack_ns *snsp;
+
+	snsp = kzalloc(sizeof(*snsp), GFP_KERNEL);
+	if (snsp == NULL)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&snsp->smk_mapped);
+	mutex_init(&snsp->smk_mapped_lock);
+
+	ns->security = snsp;
+	return 0;
+}
+
+static inline void smack_userns_free(struct user_namespace *ns)
+{
+	struct smack_ns *snsp = ns->security;
+	struct smack_known *skp;
+	struct smack_known_ns *sknp, *n;
+
+	list_for_each_entry_safe(sknp, n, &snsp->smk_mapped, smk_list_ns) {
+		skp = sknp->smk_unmapped;
+
+		mutex_lock(&skp->smk_mapped_lock);
+		list_del_rcu(&sknp->smk_list_known);
+		if (sknp->smk_allocated)
+			kfree(sknp->smk_mapped);
+		kfree(sknp);
+		mutex_unlock(&skp->smk_mapped_lock);
+
+		list_del(&sknp->smk_list_ns);
+	}
+
+	kfree(snsp);
+}
+
+static inline int smack_userns_setns(struct nsproxy *nsproxy,
+				     struct user_namespace *ns)
+{
+	return 0;
+}
+
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 /**
  * smack_ismaclabel - check if xattr @name references a smack MAC label
  * @name: Full xattr name to check.
@@ -4610,6 +4701,7 @@ static struct security_hook_list smack_hooks[] = {
 
 	LSM_HOOK_INIT(d_instantiate, smack_d_instantiate),
 
+	LSM_HOOK_INIT(getprocattr_seq, smack_getprocattr_seq),
 	LSM_HOOK_INIT(getprocattr, smack_getprocattr),
 	LSM_HOOK_INIT(setprocattr, smack_setprocattr),
 
@@ -4647,6 +4739,13 @@ static struct security_hook_list smack_hooks[] = {
 	LSM_HOOK_INIT(audit_rule_free, smack_audit_rule_free),
 #endif /* CONFIG_AUDIT */
 
+ /* Namespace hooks */
+#ifdef CONFIG_SECURITY_SMACK_NS
+	LSM_HOOK_INIT(userns_create, smack_userns_create),
+	LSM_HOOK_INIT(userns_free, smack_userns_free),
+	LSM_HOOK_INIT(userns_setns, smack_userns_setns),
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 	LSM_HOOK_INIT(ismaclabel, smack_ismaclabel),
 	LSM_HOOK_INIT(secid_to_secctx, smack_secid_to_secctx),
 	LSM_HOOK_INIT(secctx_to_secid, smack_secctx_to_secid),
@@ -4659,6 +4758,27 @@ static struct security_hook_list smack_hooks[] = {
 
 static __init void init_smack_known_list(void)
 {
+#ifdef CONFIG_SECURITY_SMACK_NS
+	/*
+	 * Initialize mapped list locks
+	 */
+	mutex_init(&smack_known_huh.smk_mapped_lock);
+	mutex_init(&smack_known_hat.smk_mapped_lock);
+	mutex_init(&smack_known_floor.smk_mapped_lock);
+	mutex_init(&smack_known_star.smk_mapped_lock);
+	mutex_init(&smack_known_invalid.smk_mapped_lock);
+	mutex_init(&smack_known_web.smk_mapped_lock);
+	/*
+	 * Initialize mapped lists
+	 */
+	INIT_LIST_HEAD(&smack_known_huh.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_hat.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_star.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_floor.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_invalid.smk_mapped);
+	INIT_LIST_HEAD(&smack_known_web.smk_mapped);
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
 	/*
 	 * Initialize rule list locks
 	 */

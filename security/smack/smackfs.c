@@ -340,36 +340,17 @@ static int smk_fill_rule(const char *subject, const char *object,
 				struct smack_parsed_rule *rule, int import,
 				int len)
 {
-	const char *cp;
-	struct smack_known *skp;
+	rule->smk_subject = smk_get_label(subject, len, import);
+	if (IS_ERR(rule->smk_subject))
+		return PTR_ERR(rule->smk_subject);
+	if (rule->smk_subject == NULL)
+		return -ENOENT;
 
-	if (import) {
-		rule->smk_subject = smk_import_entry(subject, len);
-		if (IS_ERR(rule->smk_subject))
-			return PTR_ERR(rule->smk_subject);
-
-		rule->smk_object = smk_import_entry(object, len);
-		if (IS_ERR(rule->smk_object))
-			return PTR_ERR(rule->smk_object);
-	} else {
-		cp = smk_parse_smack(subject, len);
-		if (IS_ERR(cp))
-			return PTR_ERR(cp);
-		skp = smk_find_entry(cp);
-		kfree(cp);
-		if (skp == NULL)
-			return -ENOENT;
-		rule->smk_subject = skp;
-
-		cp = smk_parse_smack(object, len);
-		if (IS_ERR(cp))
-			return PTR_ERR(cp);
-		skp = smk_find_entry(cp);
-		kfree(cp);
-		if (skp == NULL)
-			return -ENOENT;
-		rule->smk_object = skp;
-	}
+	rule->smk_object = smk_get_label(object, len, import);
+	if (IS_ERR(rule->smk_object))
+		return PTR_ERR(rule->smk_object);
+	if (rule->smk_object == NULL)
+		return -ENOENT;
 
 	rule->smk_access1 = smk_perm_from_str(access1);
 	if (access2)
@@ -592,6 +573,9 @@ static void smk_seq_stop(struct seq_file *s, void *v)
 
 static void smk_rule_show(struct seq_file *s, struct smack_rule *srp, int max)
 {
+	char *sbj;
+	char *obj;
+
 	/*
 	 * Don't show any rules with label names too long for
 	 * interface file (/smack/load or /smack/load2)
@@ -605,9 +589,13 @@ static void smk_rule_show(struct seq_file *s, struct smack_rule *srp, int max)
 	if (srp->smk_access == 0)
 		return;
 
-	seq_printf(s, "%s %s",
-		   srp->smk_subject->smk_known,
-		   srp->smk_object->smk_known);
+	sbj = smk_find_label_name(srp->smk_subject);
+	obj = smk_find_label_name(srp->smk_object);
+
+	if (sbj == NULL || obj == NULL)
+		return;
+
+	seq_printf(s, "%s %s", sbj, obj);
 
 	seq_putc(s, ' ');
 
@@ -798,6 +786,7 @@ static int cipso_seq_show(struct seq_file *s, void *v)
 		list_entry_rcu(list, struct smack_known, list);
 	struct netlbl_lsm_catmap *cmp = skp->smk_netlabel.attr.mls.cat;
 	char sep = '/';
+	char *cp;
 	int i;
 
 	/*
@@ -811,7 +800,11 @@ static int cipso_seq_show(struct seq_file *s, void *v)
 	if (strlen(skp->smk_known) >= SMK_LABELLEN)
 		return 0;
 
-	seq_printf(s, "%s %3d", skp->smk_known, skp->smk_netlabel.attr.mls.lvl);
+	cp = smk_find_label_name(skp);
+	if (cp == NULL)
+		return 0;
+
+	seq_printf(s, "%s %3d", cp, skp->smk_netlabel.attr.mls.lvl);
 
 	for (i = netlbl_catmap_walk(cmp, 0); i >= 0;
 	     i = netlbl_catmap_walk(cmp, i + 1)) {
@@ -900,7 +893,7 @@ static ssize_t smk_set_cipso(struct file *file, const char __user *buf,
 	 */
 	mutex_lock(&smack_cipso_lock);
 
-	skp = smk_import_entry(rule, 0);
+	skp = smk_get_label(rule, 0, true);
 	if (IS_ERR(skp)) {
 		rc = PTR_ERR(skp);
 		goto out;
@@ -989,9 +982,14 @@ static int cipso2_seq_show(struct seq_file *s, void *v)
 		list_entry_rcu(list, struct smack_known, list);
 	struct netlbl_lsm_catmap *cmp = skp->smk_netlabel.attr.mls.cat;
 	char sep = '/';
+	char *cp;
 	int i;
 
-	seq_printf(s, "%s %3d", skp->smk_known, skp->smk_netlabel.attr.mls.lvl);
+	cp = smk_find_label_name(skp);
+	if (cp == NULL)
+		return 0;
+
+	seq_printf(s, "%s %3d", cp, skp->smk_netlabel.attr.mls.lvl);
 
 	for (i = netlbl_catmap_walk(cmp, 0); i >= 0;
 	     i = netlbl_catmap_walk(cmp, i + 1)) {
@@ -1072,8 +1070,12 @@ static int net4addr_seq_show(struct seq_file *s, void *v)
 			list_entry_rcu(list, struct smk_net4addr, list);
 	char *kp = SMACK_CIPSO_OPTION;
 
-	if (skp->smk_label != NULL)
-		kp = skp->smk_label->smk_known;
+	if (skp->smk_label != NULL) {
+		kp = smk_find_label_name(skp->smk_label);
+		if (kp == NULL)
+			kp = smack_known_huh.smk_known;
+	}
+
 	seq_printf(s, "%pI4/%d %s\n", &skp->smk_host.s_addr,
 			skp->smk_masks, kp);
 
@@ -1224,7 +1226,7 @@ static ssize_t smk_write_net4addr(struct file *file, const char __user *buf,
 	 * If smack begins with '-', it is an option, don't import it
 	 */
 	if (smack[0] != '-') {
-		skp = smk_import_entry(smack, 0);
+		skp = smk_get_label(smack, 0, true);
 		if (IS_ERR(skp)) {
 			rc = PTR_ERR(skp);
 			goto free_out;
@@ -1343,10 +1345,16 @@ static int net6addr_seq_show(struct seq_file *s, void *v)
 	struct list_head *list = v;
 	struct smk_net6addr *skp =
 			 list_entry(list, struct smk_net6addr, list);
+	char *kp;
 
-	if (skp->smk_label != NULL)
-		seq_printf(s, "%pI6/%d %s\n", &skp->smk_host, skp->smk_masks,
-				skp->smk_label->smk_known);
+	if (skp->smk_label != NULL) {
+		kp = smk_find_label_name(skp->smk_label);
+		if (kp == NULL)
+			kp = smack_known_huh.smk_known;
+
+		seq_printf(s, "%pI6/%d %s\n", &skp->smk_host,
+				skp->smk_masks, kp);
+	}
 
 	return 0;
 }
@@ -1500,7 +1508,7 @@ static ssize_t smk_write_net6addr(struct file *file, const char __user *buf,
 	 * If smack begins with '-', it is an option, don't import it
 	 */
 	if (smack[0] != '-') {
-		skp = smk_import_entry(smack, 0);
+		skp = smk_get_label(smack, 0, true);
 		if (IS_ERR(skp)) {
 			rc = PTR_ERR(skp);
 			goto free_out;
@@ -1820,6 +1828,7 @@ static ssize_t smk_read_ambient(struct file *filp, char __user *buf,
 				size_t cn, loff_t *ppos)
 {
 	ssize_t rc;
+	char *cp;
 	int asize;
 
 	if (*ppos != 0)
@@ -1830,12 +1839,14 @@ static ssize_t smk_read_ambient(struct file *filp, char __user *buf,
 	 */
 	mutex_lock(&smack_ambient_lock);
 
-	asize = strlen(smack_net_ambient->smk_known) + 1;
+	cp = smk_find_label_name(smack_net_ambient);
+	if (cp == NULL)
+		cp = smack_known_huh.smk_known;
+
+	asize = strlen(cp) + 1;
 
 	if (cn >= asize)
-		rc = simple_read_from_buffer(buf, cn, ppos,
-					     smack_net_ambient->smk_known,
-					     asize);
+		rc = simple_read_from_buffer(buf, cn, ppos, cp, asize);
 	else
 		rc = -EINVAL;
 
@@ -1873,7 +1884,7 @@ static ssize_t smk_write_ambient(struct file *file, const char __user *buf,
 		goto out;
 	}
 
-	skp = smk_import_entry(data, count);
+	skp = smk_get_label(data, count, true);
 	if (IS_ERR(skp)) {
 		rc = PTR_ERR(skp);
 		goto out;
@@ -1913,11 +1924,16 @@ static void *onlycap_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 static int onlycap_seq_show(struct seq_file *s, void *v)
 {
+	char *smack;
 	struct list_head *list = v;
 	struct smack_onlycap *sop =
 		list_entry_rcu(list, struct smack_onlycap, list);
 
-	seq_puts(s, sop->smk_label->smk_known);
+	smack = smk_find_label_name(sop->smk_label);
+	if (smack == NULL)
+		smack = smack_known_huh.smk_known;
+
+	seq_puts(s, smack);
 	seq_putc(s, ' ');
 
 	return 0;
@@ -2011,7 +2027,7 @@ static ssize_t smk_write_onlycap(struct file *file, const char __user *buf,
 		if (!*tok)
 			continue;
 
-		skp = smk_import_entry(tok, 0);
+		skp = smk_get_label(tok, 0, true);
 		if (IS_ERR(skp)) {
 			rc = PTR_ERR(skp);
 			break;
@@ -2081,8 +2097,11 @@ static ssize_t smk_read_unconfined(struct file *filp, char __user *buf,
 	if (*ppos != 0)
 		return 0;
 
-	if (smack_unconfined != NULL)
-		smack = smack_unconfined->smk_known;
+	if (smack_unconfined != NULL) {
+		smack = smk_find_label_name(smack_unconfined);
+		if (smack == NULL)
+			smack = smack_known_huh.smk_known;
+	}
 
 	asize = strlen(smack) + 1;
 
@@ -2129,7 +2148,7 @@ static ssize_t smk_write_unconfined(struct file *file, const char __user *buf,
 	 *
 	 * But do so only on invalid label, not on system errors.
 	 */
-	skp = smk_import_entry(data, count);
+	skp = smk_get_label(data, count, true);
 	if (PTR_ERR(skp) == -EINVAL)
 		skp = NULL;
 	else if (IS_ERR(skp)) {
@@ -2526,7 +2545,6 @@ static ssize_t smk_write_revoke_subj(struct file *file, const char __user *buf,
 				size_t count, loff_t *ppos)
 {
 	char *data;
-	const char *cp;
 	struct smack_known *skp;
 	struct smack_rule *sp;
 	struct list_head *rule_list;
@@ -2551,15 +2569,13 @@ static ssize_t smk_write_revoke_subj(struct file *file, const char __user *buf,
 		goto out_data;
 	}
 
-	cp = smk_parse_smack(data, count);
-	if (IS_ERR(cp)) {
-		rc = PTR_ERR(cp);
+	skp = smk_get_label(data, count, false);
+	if (IS_ERR(skp)) {
+		rc = PTR_ERR(skp);
 		goto out_data;
 	}
-
-	skp = smk_find_entry(cp);
 	if (skp == NULL)
-		goto out_cp;
+		goto out_data;
 
 	rule_list = &skp->smk_rules;
 	rule_lock = &skp->smk_rules_lock;
@@ -2571,8 +2587,6 @@ static ssize_t smk_write_revoke_subj(struct file *file, const char __user *buf,
 
 	mutex_unlock(rule_lock);
 
-out_cp:
-	kfree(cp);
 out_data:
 	kfree(data);
 
@@ -2641,8 +2655,11 @@ static ssize_t smk_read_syslog(struct file *filp, char __user *buf,
 	if (*ppos != 0)
 		return 0;
 
-	if (smack_syslog_label != NULL)
-		smack = smack_syslog_label->smk_known;
+	if (smack_syslog_label != NULL) {
+		smack = smk_find_label_name(smack_syslog_label);
+		if (smack == NULL)
+			smack = smack_known_huh.smk_known;
+	}
 
 	asize = strlen(smack) + 1;
 
@@ -2689,7 +2706,7 @@ static ssize_t smk_write_syslog(struct file *file, const char __user *buf,
 	 *
 	 * But do so only on invalid label, not on system errors.
 	 */
-	skp = smk_import_entry(data, count);
+	skp = smk_get_label(data, count, true);
 	if (PTR_ERR(skp) == -EINVAL)
 		skp = NULL;
 	else if (IS_ERR(skp)) {

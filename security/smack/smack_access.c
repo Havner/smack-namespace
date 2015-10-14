@@ -716,3 +716,44 @@ int smack_privileged(int cap)
 {
 	return smack_ns_privileged(&init_user_ns, cap);
 }
+
+/**
+ * smk_find_label_name - A helper to get a string value of a label
+ * @skp: a label we want a string value from
+ *
+ * Returns a pointer to a label name or NULL if label name not found.
+ */
+char *smk_find_label_name(struct smack_known *skp)
+{
+	return skp->smk_known;
+}
+
+/**
+ * smk_get_label - A helper to get the smack_known value from a string using
+ *                 either import or find functions if it already exists
+ * @string: a name of a label we look for or want to import
+ * @len: the string size, or zero if it is NULL terminated
+ * @import: whether we should import the label if not found
+ *
+ * Returns a smack_known label that is either imported or found.
+ * NULL if label not found (only when import == false).
+ * Error code otherwise.
+ */
+struct smack_known *smk_get_label(const char *string, int len, bool import)
+{
+	struct smack_known *skp;
+	char *cp;
+
+	if (import) {
+		skp = smk_import_entry(string, len);
+	} else {
+		cp = smk_parse_smack(string, len);
+		if (IS_ERR(cp))
+			return ERR_CAST(cp);
+
+		skp = smk_find_entry(cp);
+		kfree(cp);
+	}
+
+	return skp;
+}

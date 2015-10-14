@@ -59,6 +59,9 @@ struct user_namespace init_user_ns = {
 	.persistent_keyring_register_sem =
 	__RWSEM_INITIALIZER(init_user_ns.persistent_keyring_register_sem),
 #endif
+#ifdef CONFIG_SECURITY
+	.security = NULL,
+#endif
 };
 EXPORT_SYMBOL_GPL(init_user_ns);
 

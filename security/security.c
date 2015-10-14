@@ -25,6 +25,7 @@
 #include <linux/mount.h>
 #include <linux/personality.h>
 #include <linux/backing-dev.h>
+#include <linux/user_namespace.h>
 #include <net/flow.h>
 
 #define MAX_LSM_EVM_XATTR	2
@@ -1538,6 +1539,25 @@ int security_audit_rule_match(u32 secid, u32 field, u32 op, void *lsmrule,
 }
 #endif /* CONFIG_AUDIT */
 
+#ifdef CONFIG_USER_NS
+
+int security_userns_create(struct user_namespace *ns)
+{
+	return call_int_hook(userns_create, 0, ns);
+}
+
+void security_userns_free(struct user_namespace *ns)
+{
+	call_void_hook(userns_free, ns);
+}
+
+int security_userns_setns(struct nsproxy *nsproxy, struct user_namespace *ns)
+{
+	return call_int_hook(userns_setns, 0, nsproxy, ns);
+}
+
+#endif /* CONFIG_USER_NS */
+
 struct security_hook_heads security_hook_heads = {
 	.binder_set_context_mgr =
 		LIST_HEAD_INIT(security_hook_heads.binder_set_context_mgr),
@@ -1882,4 +1902,12 @@ struct security_hook_heads security_hook_heads = {
 	.audit_rule_free =
 		LIST_HEAD_INIT(security_hook_heads.audit_rule_free),
 #endif /* CONFIG_AUDIT */
+#ifdef CONFIG_USER_NS
+	.userns_create =
+		LIST_HEAD_INIT(security_hook_heads.userns_create),
+	.userns_free =
+		LIST_HEAD_INIT(security_hook_heads.userns_free),
+	.userns_setns =
+		LIST_HEAD_INIT(security_hook_heads.userns_setns),
+#endif /* CONFIG_USER_NS */
 };

@@ -1584,6 +1584,29 @@ static inline void security_audit_rule_free(void *lsmrule)
 #endif /* CONFIG_SECURITY */
 #endif /* CONFIG_AUDIT */
 
+#ifdef CONFIG_USER_NS
+int security_userns_create(struct user_namespace *ns);
+void security_userns_free(struct user_namespace *ns);
+int security_userns_setns(struct nsproxy *nsproxy, struct user_namespace *ns);
+
+#else
+
+static inline int security_userns_create(struct user_namespace *ns)
+{
+	return 0;
+}
+
+static inline void security_userns_free(struct user_namespace *ns)
+{ }
+
+static inline int security_userns_setns(struct nsproxy *nsproxy,
+					struct user_namespace *ns)
+{
+	return 0;
+}
+
+#endif /* CONFIG_USER_NS */
+
 #ifdef CONFIG_SECURITYFS
 
 extern struct dentry *securityfs_create_file(const char *name, umode_t mode,

@@ -22,6 +22,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <net/net_namespace.h>
+#include <linux/user_namespace.h>
 #include <net/cipso_ipv4.h>
 #include <linux/seq_file.h>
 #include <linux/ctype.h>
@@ -61,6 +62,7 @@ enum smk_inos {
 #if IS_ENABLED(CONFIG_IPV6)
 	SMK_NET6ADDR	= 23,	/* single label IPv6 hosts */
 #endif /* CONFIG_IPV6 */
+	SMK_LABELS	= 23,	/* debug list of rules */
 };
 
 /*
@@ -2809,6 +2811,68 @@ static const struct file_operations smk_ptrace_ops = {
 	.llseek		= default_llseek,
 };
 
+/*
+ * Seq_file read operations for /smack/labels
+ */
+
+static void *labels_seq_start(struct seq_file *s, loff_t *pos)
+{
+	return smk_seq_start(s, pos, &smack_known_list);
+}
+
+static void *labels_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	return smk_seq_next(s, v, pos, &smack_known_list);
+}
+
+static int labels_seq_show(struct seq_file *s, void *v)
+{
+	struct list_head *list = v;
+	struct smack_known *skp = list_entry(list, struct smack_known, list);
+#ifdef CONFIG_SECURITY_SMACK_NS
+	struct smack_known_ns *sknp;
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
+	seq_printf(s, "%s(init): ", skp->smk_known);
+
+#ifdef CONFIG_SECURITY_SMACK_NS
+	list_for_each_entry_rcu(sknp, &skp->smk_mapped, smk_list_known) {
+		seq_printf(s, "%s(%u), ", sknp->smk_mapped,
+			   sknp->smk_ns->ns.inum);
+	}
+#endif /* CONFIG_SECURITY_SMACK_NS */
+
+	seq_puts(s, "\b\b\n");
+
+	return 0;
+}
+
+static const struct seq_operations labels_seq_ops = {
+	.start = labels_seq_start,
+	.next  = labels_seq_next,
+	.show  = labels_seq_show,
+	.stop  = smk_seq_stop,
+};
+
+/**
+ * smk_open_labels - open() for /smack/labels
+ * @inode: inode structure representing file
+ * @file: "load" file pointer
+ *
+ * For reading, use load_seq_* seq_file reading operations.
+ */
+static int smk_open_labels(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &labels_seq_ops);
+}
+
+static const struct file_operations smk_labels_ops = {
+	.open		= smk_open_labels,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
 /**
  * smk_fill_super - fill the smackfs superblock
  * @sb: the empty superblock
@@ -2872,6 +2936,8 @@ static int smk_fill_super(struct super_block *sb, void *data, int silent)
 		[SMK_NET6ADDR] = {
 			"ipv6host", &smk_net6addr_ops, S_IRUGO|S_IWUSR},
 #endif /* CONFIG_IPV6 */
+		[SMK_LABELS] = {
+			"labels", &smk_labels_ops, S_IRUGO},
 		/* last one */
 			{""}
 	};

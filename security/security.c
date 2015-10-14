@@ -644,6 +644,16 @@ int security_inode_setxattr(struct dentry *dentry, const char *name,
 	return evm_inode_setxattr(dentry, name, value, size);
 }
 
+int security_inode_pre_setxattr(struct dentry *dentry, const char *name,
+				const void **value, size_t *size, int flags,
+				bool *alloc)
+{
+	if (unlikely(IS_PRIVATE(d_backing_inode(dentry))))
+		return 0;
+	return call_int_hook(inode_pre_setxattr, 0, dentry, name, value, size,
+			     flags, alloc);
+}
+
 void security_inode_post_setxattr(struct dentry *dentry, const char *name,
 				  const void *value, size_t size, int flags)
 {
@@ -1662,6 +1672,8 @@ struct security_hook_heads security_hook_heads = {
 		LIST_HEAD_INIT(security_hook_heads.inode_getattr),
 	.inode_setxattr =
 		LIST_HEAD_INIT(security_hook_heads.inode_setxattr),
+	.inode_pre_setxattr =
+		LIST_HEAD_INIT(security_hook_heads.inode_pre_setxattr),
 	.inode_post_setxattr =
 		LIST_HEAD_INIT(security_hook_heads.inode_post_setxattr),
 	.inode_getxattr =

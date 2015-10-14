@@ -263,6 +263,9 @@ int security_inode_setattr(struct dentry *dentry, struct iattr *attr);
 int security_inode_getattr(const struct path *path);
 int security_inode_setxattr(struct dentry *dentry, const char *name,
 			    const void *value, size_t size, int flags);
+int security_inode_pre_setxattr(struct dentry *dentry, const char *name,
+				const void **value, size_t *size, int flags,
+				bool *alloc);
 void security_inode_post_setxattr(struct dentry *dentry, const char *name,
 				  const void *value, size_t size, int flags);
 int security_inode_getxattr(struct dentry *dentry, const char *name);
@@ -689,6 +692,13 @@ static inline int security_inode_setxattr(struct dentry *dentry,
 		const char *name, const void *value, size_t size, int flags)
 {
 	return cap_inode_setxattr(dentry, name, value, size, flags);
+}
+
+static inline int security_inode_pre_setxattr(struct dentry *dentry,
+				const char *name, const void **value,
+				size_t *size, int flags, bool *alloc)
+{
+	return 0;
 }
 
 static inline void security_inode_post_setxattr(struct dentry *dentry,

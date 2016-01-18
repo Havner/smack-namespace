@@ -1828,7 +1828,7 @@ static const struct file_operations smk_mapped_ops = {
 static ssize_t smk_read_ambient(struct file *filp, char __user *buf,
 				size_t cn, loff_t *ppos)
 {
-	ssize_t rc;
+	ssize_t rc = -EINVAL;
 	char *cp;
 	int asize;
 
@@ -1848,8 +1848,6 @@ static ssize_t smk_read_ambient(struct file *filp, char __user *buf,
 
 	if (cn >= asize)
 		rc = simple_read_from_buffer(buf, cn, ppos, cp, asize);
-	else
-		rc = -EINVAL;
 
 	mutex_unlock(&smack_ambient_lock);
 

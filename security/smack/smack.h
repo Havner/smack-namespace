@@ -292,7 +292,7 @@ struct smk_audit_info {
 int smk_access_entry(char *, char *, struct list_head *);
 int smk_access(struct smack_known *, struct smack_known *,
 	       int, struct smk_audit_info *);
-int smk_tskacc(struct task_smack *, struct smack_known *,
+int smk_tskacc(struct task_struct *, struct smack_known *,
 	       u32, struct smk_audit_info *);
 int smk_curacc(struct smack_known *, u32, struct smk_audit_info *);
 struct smack_known *smack_from_secid(const u32);
@@ -350,6 +350,7 @@ extern struct hlist_head smack_known_hash[SMACK_HASH_SLOTS];
 static inline int smk_inode_transmutable(const struct inode *isp)
 {
 	struct inode_smack *sip = isp->i_security;
+
 	return (sip->smk_flags & SMK_INODE_TRANSMUTE) != 0;
 }
 
@@ -359,7 +360,28 @@ static inline int smk_inode_transmutable(const struct inode *isp)
 static inline struct smack_known *smk_of_inode(const struct inode *isp)
 {
 	struct inode_smack *sip = isp->i_security;
+
 	return sip->smk_inode;
+}
+
+/*
+ * Present a pointer to the smack label entry in an inode blob for an exec.
+ */
+static inline struct smack_known *smk_of_exec(const struct inode *isp)
+{
+	struct inode_smack *sip = isp->i_security;
+
+	return sip->smk_task;
+}
+
+/*
+ * Present a pointer to the smack label entry in an inode blob for an mmap.
+ */
+static inline struct smack_known *smk_of_mmap(const struct inode *isp)
+{
+	struct inode_smack *sip = isp->i_security;
+
+	return sip->smk_mmap;
 }
 
 /*
@@ -394,6 +416,29 @@ static inline struct smack_known *smk_of_forked(const struct task_smack *tsp)
 static inline struct smack_known *smk_of_current(void)
 {
 	return smk_of_task(current_security());
+}
+
+/*
+ * Present a pointer to the user namespace entry in an task blob.
+ */
+static inline
+struct user_namespace *ns_of_task_struct(const struct task_struct *t)
+{
+	struct user_namespace *ns;
+
+	rcu_read_lock();
+	ns = __task_cred(t)->user_ns;
+	rcu_read_unlock();
+
+	return ns;
+}
+
+/*
+ * Present a pointer to the user namespace entry in the current task blob.
+ */
+static inline struct user_namespace *ns_of_current(void)
+{
+	return current_user_ns();
 }
 
 /*

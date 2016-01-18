@@ -22,6 +22,7 @@
 #include <linux/ctype.h>
 #include <linux/projid.h>
 #include <linux/fs_struct.h>
+#include <linux/security.h>
 
 static struct kmem_cache *user_ns_cachep __read_mostly;
 static DEFINE_MUTEX(userns_state_mutex);
@@ -109,6 +110,15 @@ int create_user_ns(struct cred *new)
 
 	set_cred_user_ns(new, ns);
 
+#ifdef CONFIG_SECURITY
+	ret = security_userns_create(ns);
+	if (ret) {
+		ns_free_inum(&ns->ns);
+		kmem_cache_free(user_ns_cachep, ns);
+		return ret;
+	}
+#endif
+
 #ifdef CONFIG_PERSISTENT_KEYRINGS
 	init_rwsem(&ns->persistent_keyring_register_sem);
 #endif
@@ -143,6 +153,9 @@ void free_user_ns(struct user_namespace *ns)
 		parent = ns->parent;
 #ifdef CONFIG_PERSISTENT_KEYRINGS
 		key_put(ns->persistent_keyring_register);
+#endif
+#ifdef CONFIG_SECURITY
+		security_userns_free(ns);
 #endif
 		ns_free_inum(&ns->ns);
 		kmem_cache_free(user_ns_cachep, ns);
@@ -970,6 +983,7 @@ static int userns_install(struct nsproxy *nsproxy, struct ns_common *ns)
 {
 	struct user_namespace *user_ns = to_user_ns(ns);
 	struct cred *cred;
+	int err;
 
 	/* Don't allow gaining capabilities by reentering
 	 * the same user namespace.
@@ -986,6 +1000,10 @@ static int userns_install(struct nsproxy *nsproxy, struct ns_common *ns)
 
 	if (!ns_capable(user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
+
+	err = security_userns_setns(nsproxy, user_ns);
+	if (err)
+		return err;
 
 	cred = prepare_creds();
 	if (!cred)

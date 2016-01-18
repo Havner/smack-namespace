@@ -39,6 +39,10 @@ struct user_namespace {
 	struct key		*persistent_keyring_register;
 	struct rw_semaphore	persistent_keyring_register_sem;
 #endif
+
+#ifdef CONFIG_SECURITY
+	void *security;
+#endif
 };
 
 extern struct user_namespace init_user_ns;

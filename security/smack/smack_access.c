@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/sched.h>
+#include <linux/user_namespace.h>
 #include "smack.h"
 
 struct smack_known smack_known_huh = {
@@ -113,6 +114,7 @@ int smk_access_entry(char *subject_label, char *object_label,
  * smk_access - determine if a subject has a specific access to an object
  * @subject: a pointer to the subject's Smack label entry
  * @object: a pointer to the object's Smack label entry
+ * @ns: user namespace to check against (usually subject's)
  * @request: the access requested, in "MAY" format
  * @a : a pointer to the audit data
  *
@@ -123,10 +125,34 @@ int smk_access_entry(char *subject_label, char *object_label,
  * Smack labels are shared on smack_list
  */
 int smk_access(struct smack_known *subject, struct smack_known *object,
-	       int request, struct smk_audit_info *a)
+	       struct user_namespace *ns, int request, struct smk_audit_info *a)
 {
 	int may = MAY_NOT;
 	int rc = 0;
+	char *subject_label = subject->smk_known;
+	char *object_label = object->smk_known;
+#ifdef CONFIG_SECURITY_SMACK_NS
+	struct smack_known_ns *sknp;
+	struct smack_known_ns *oknp;
+
+	/*
+	 * For the namespaced case we need to check whether the labels
+	 * are mapped. If not, refuse. If yes check the builtin rules
+	 * on the mapped label strings so the builtin labels can
+	 * work properly inside the namespace.
+	 */
+	if (smk_find_mapped_ns(ns)) {
+		sknp = smk_find_mapped(subject, ns);
+		oknp = smk_find_mapped(object, ns);
+		if (!sknp || !oknp) {
+			rc = -EACCES;
+			goto out_audit;
+		}
+
+		subject_label = sknp->smk_mapped;
+		object_label = oknp->smk_mapped;
+	}
+#endif
 
 	/*
 	 * Hardcoded comparisons.
@@ -134,7 +160,7 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 	/*
 	 * A star subject can't access any object.
 	 */
-	if (subject == &smack_known_star) {
+	if (subject_label == smack_known_star.smk_known) {
 		rc = -EACCES;
 		goto out_audit;
 	}
@@ -143,18 +169,19 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 	 * Tasks cannot be assigned the internet label.
 	 * An internet subject can access any object.
 	 */
-	if (object == &smack_known_web || subject == &smack_known_web)
+	if (object_label == smack_known_web.smk_known ||
+	    subject_label == smack_known_web.smk_known)
 		goto out_audit;
 	/*
 	 * A star object can be accessed by any subject.
 	 */
-	if (object == &smack_known_star)
+	if (object_label == smack_known_star.smk_known)
 		goto out_audit;
 	/*
 	 * An object can be accessed in any way by a subject
 	 * with the same label.
 	 */
-	if (subject->smk_known == object->smk_known)
+	if (subject_label == object_label)
 		goto out_audit;
 	/*
 	 * A hat subject can read or lock any object.
@@ -162,9 +189,9 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 	 */
 	if ((request & MAY_ANYREAD) == request ||
 	    (request & MAY_LOCK) == request) {
-		if (object == &smack_known_floor)
+		if (object_label == smack_known_floor.smk_known)
 			goto out_audit;
-		if (subject == &smack_known_hat)
+		if (subject_label == smack_known_hat.smk_known)
 			goto out_audit;
 	}
 
@@ -174,6 +201,7 @@ int smk_access(struct smack_known *subject, struct smack_known *object,
 	 * access (e.g. read is included in readwrite) it's
 	 * good. A negative response from smk_access_entry()
 	 * indicates there is no entry for this pair.
+	 * For this check we need real, not mapped labels.
 	 */
 	rcu_read_lock();
 	may = smk_access_entry(subject->smk_known, object->smk_known,
@@ -219,6 +247,7 @@ out_audit:
  * smk_tskacc - determine if a task has a specific access to an object
  * @tsp: a pointer to the subject's task
  * @obj_known: a pointer to the object's label entry
+ * @obj_ns: an object's namespace to check the caps against
  * @mode: the access requested, in "MAY" format
  * @a : common audit data
  *
@@ -228,16 +257,18 @@ out_audit:
  * to override the rules.
  */
 int smk_tskacc(struct task_struct *task, struct smack_known *obj_known,
-	       u32 mode, struct smk_audit_info *a)
+	       struct user_namespace *obj_ns, u32 mode,
+	       struct smk_audit_info *a)
 {
 	struct smack_known *sbj_known = smk_of_task_struct(task);
+	struct user_namespace *sbj_ns = ns_of_task_struct(task);
 	int may;
 	int rc;
 
 	/*
 	 * Check the global rule list
 	 */
-	rc = smk_access(sbj_known, obj_known, mode, NULL);
+	rc = smk_access(sbj_known, obj_known, sbj_ns, mode, NULL);
 	if (rc >= 0) {
 		struct task_smack *tsp;
 
@@ -261,8 +292,10 @@ int smk_tskacc(struct task_struct *task, struct smack_known *obj_known,
 
 	/*
 	 * Allow for priviliged to override policy.
+	 * Either in init_ns or when both labels are mapped.
 	 */
-	if (rc != 0 && smack_privileged(CAP_MAC_OVERRIDE))
+	if (rc != 0 && smk_labels_valid(sbj_known, obj_known, sbj_ns)
+	    && smack_has_ns_privilege(task, obj_ns, CAP_MAC_OVERRIDE))
 		rc = 0;
 
 out_audit:
@@ -277,6 +310,7 @@ out_audit:
 /**
  * smk_curacc - determine if current has a specific access to an object
  * @obj_known: a pointer to the object's Smack label entry
+ * @obj_ns: an object's namespace to check the caps against
  * @mode: the access requested, in "MAY" format
  * @a : common audit data
  *
@@ -285,10 +319,10 @@ out_audit:
  * non zero otherwise. It allows that current may have the capability
  * to override the rules.
  */
-int smk_curacc(struct smack_known *obj_known,
+int smk_curacc(struct smack_known *obj_known, struct user_namespace *obj_ns,
 	       u32 mode, struct smk_audit_info *a)
 {
-	return smk_tskacc(current, obj_known, mode, a);
+	return smk_tskacc(current, obj_known, obj_ns, mode, a);
 }
 
 #ifdef CONFIG_AUDIT
@@ -671,12 +705,15 @@ DEFINE_MUTEX(smack_onlycap_lock);
  *
  * For a capability in smack related checks to be effective it needs to:
  * - be allowed to be privileged by the onlycap rule.
- * - be in the initial user ns
+ * - be in the initial user ns or have a filled map in the child ns
  */
 static int smack_capability_allowed(struct smack_known *skp,
 				    struct user_namespace *user_ns)
 {
 	struct smack_known_list_elem *sklep;
+#ifdef CONFIG_SECURITY_SMACK_NS
+	struct smack_ns *sns;
+#endif
 
 	/*
 	 * All kernel tasks are privileged
@@ -684,8 +721,15 @@ static int smack_capability_allowed(struct smack_known *skp,
 	if (unlikely(current->flags & PF_KTHREAD))
 		return 1;
 
+#ifdef CONFIG_SECURITY_SMACK_NS
+	sns = user_ns->security;
+
+	if (user_ns != &init_user_ns && list_empty(&sns->smk_mapped))
+		return 0;
+#else
 	if (user_ns != &init_user_ns)
 		return 0;
+#endif /* CONFIG_SECURITY_SMACK_NS */
 
 	rcu_read_lock();
 	if (list_empty(&smack_onlycap_list)) {
@@ -755,14 +799,32 @@ int smack_privileged(int cap)
 }
 
 /**
- * smk_find_label_name - A helper to get a string value of a label
+ * smk_find_label_name - A helper to get a string value of either a label or a
+ *                       mapped label when inside a namespace
  * @skp: a label we want a string value from
+ * @ns: namespace against which we want to get the value
  *
  * Returns a pointer to a label name or NULL if label name not found.
  */
-char *smk_find_label_name(struct smack_known *skp)
+char *smk_find_label_name(struct smack_known *skp, struct user_namespace *ns)
 {
-	return skp->smk_known;
+	char *name = NULL;
+
+#ifdef CONFIG_SECURITY_SMACK_NS
+	struct smack_known_ns *sknp;
+
+	if (smk_find_mapped_ns(ns)) {
+		sknp = smk_find_mapped(skp, ns);
+		if (sknp != NULL)
+			name = sknp->smk_mapped;
+	} else {
+		name = skp->smk_known;
+	}
+#else
+	name = skp->smk_known;
+#endif
+
+	return name;
 }
 
 /**
@@ -771,16 +833,31 @@ char *smk_find_label_name(struct smack_known *skp)
  * @string: a name of a label we look for or want to import
  * @len: the string size, or zero if it is NULL terminated
  * @import: whether we should import the label if not found
+ * @ns: a namespace the looked for label should be in
  *
  * Returns a smack_known label that is either imported or found.
  * NULL if label not found (only when import == false).
  * Error code otherwise.
  */
-struct smack_known *smk_get_label(const char *string, int len, bool import)
+struct smack_known *smk_get_label(const char *string, int len, bool import,
+				  struct user_namespace *ns)
 {
 	struct smack_known *skp;
 	bool allocated;
 	char *cp;
+
+#ifdef CONFIG_SECURITY_SMACK_NS
+	if (smk_find_mapped_ns(ns)) {
+		skp = smk_find_unmapped(string, len, ns);
+
+		/* Label not found but we can't import in namespaces */
+		if (skp == NULL && import)
+			skp = ERR_PTR(-EBADR);
+
+		/* will also return error codes from smk_find_unmapped() */
+		return skp;
+	}
+#endif
 
 	if (import) {
 		skp = smk_import_entry(string, len);

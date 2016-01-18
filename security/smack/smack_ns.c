@@ -206,6 +206,41 @@ unlockout:
 	return sknp;
 }
 
+/**
+ * smk_labels_valid - A helper to check whether labels are valid/mapped
+ *                    in the namespace and can be used there
+ * @sbj: a subject label to be checked
+ * @obj: an object label to be checked
+ * @ns: user namespace to check against (usually subject's)
+ *
+ * Returns true if both valid/mapped, false otherwise.
+ * This helper is mostly used while checking capabilities.
+ * The access functions check the validity of labels by themselves.
+ */
+bool smk_labels_valid(struct smack_known *sbj, struct smack_known *obj,
+		      struct user_namespace *ns)
+{
+	struct user_namespace *user_ns;
+
+	/*
+	 * labels are always valid if there is no map
+	 * (init_user_ns or unmapped descendants)
+	 */
+	user_ns = smk_find_mapped_ns(ns);
+	if (user_ns == NULL)
+		return true;
+
+	/*
+	 * If we have a map though, both labels need to be mapped.
+	 */
+	if (__smk_find_mapped(sbj, user_ns) == NULL)
+		return false;
+	if (__smk_find_mapped(obj, user_ns) == NULL)
+		return false;
+
+	return true;
+}
+
 /*
  * proc mapping operations
  */

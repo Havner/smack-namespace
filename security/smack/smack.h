@@ -120,6 +120,7 @@ struct superblock_smack {
 	struct smack_known	*smk_floor;
 	struct smack_known	*smk_hat;
 	struct smack_known	*smk_default;
+	struct user_namespace	*smk_ns;
 	int			smk_initialized;
 };
 
@@ -127,6 +128,7 @@ struct socket_smack {
 	struct smack_known	*smk_out;	/* outbound label */
 	struct smack_known	*smk_in;	/* inbound label */
 	struct smack_known	*smk_packet;	/* TCP peer label */
+	struct user_namespace	*smk_ns;	/* user namespace */
 };
 
 /*
@@ -146,6 +148,14 @@ struct task_smack {
 	struct list_head	smk_rules;	/* per task access rules */
 	struct mutex		smk_rules_lock;	/* lock for the rules */
 	struct list_head	smk_relabel;	/* transit allowed labels */
+};
+
+/*
+ * Used for IPC objects (sem, shm, etc)
+ */
+struct ipc_smack {
+	struct smack_known	*smk_known;	/* label for access control */
+	struct user_namespace	*smk_ns;	/* user namespace */
 };
 
 #define	SMK_INODE_INSTANT	0x01	/* inode is instantiated */
@@ -321,10 +331,11 @@ struct smk_audit_info {
  */
 int smk_access_entry(char *, char *, struct list_head *);
 int smk_access(struct smack_known *, struct smack_known *,
-	       int, struct smk_audit_info *);
+	       struct user_namespace *, int, struct smk_audit_info *);
 int smk_tskacc(struct task_struct *, struct smack_known *,
+	       struct user_namespace *, u32, struct smk_audit_info *);
+int smk_curacc(struct smack_known *, struct user_namespace *,
 	       u32, struct smk_audit_info *);
-int smk_curacc(struct smack_known *, u32, struct smk_audit_info *);
 struct smack_known *smack_from_secid(const u32);
 char *smk_parse_smack(const char *string, int len, bool *allocated);
 int smk_netlbl_mls(int, char *, struct netlbl_lsm_secattr *, int);
@@ -338,8 +349,9 @@ int smack_has_privilege(struct task_struct *task, int cap);
 int smack_ns_privileged(struct user_namespace *user_ns, int cap);
 int smack_privileged(int cap);
 void smk_destroy_label_list(struct list_head *list);
-char *smk_find_label_name(struct smack_known *skp);
-struct smack_known *smk_get_label(const char *string, int len, bool import);
+char *smk_find_label_name(struct smack_known *skp, struct user_namespace *ns);
+struct smack_known *smk_get_label(const char *string, int len, bool import,
+				  struct user_namespace *ns);
 
 /*
  * These functions are in smack_ns.c
@@ -353,6 +365,15 @@ struct smack_known *smk_find_unmapped(const char *string, int len,
 extern const struct seq_operations proc_label_map_seq_operations;
 ssize_t proc_label_map_write(struct task_struct *p, const struct cred *f_cred,
 			     void *value, size_t size);
+bool smk_labels_valid(struct smack_known *sbj, struct smack_known *obj,
+		      struct user_namespace *ns);
+#else
+static inline bool smk_labels_valid(struct smack_known *sbj,
+				    struct smack_known *obj,
+				    struct user_namespace *ns)
+{
+	return true;
+}
 #endif /* CONFIG_SECURITY_SMACK_NS */
 
 /*

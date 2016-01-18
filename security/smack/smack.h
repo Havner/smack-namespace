@@ -301,6 +301,11 @@ int smk_netlbl_mls(int, char *, struct netlbl_lsm_secattr *, int);
 struct smack_known *smk_import_entry(const char *, int);
 void smk_insert_entry(struct smack_known *skp);
 struct smack_known *smk_find_entry(const char *);
+int smack_has_ns_privilege(struct task_struct *task,
+			   struct user_namespace *user_ns,
+			   int cap);
+int smack_has_privilege(struct task_struct *task, int cap);
+int smack_ns_privileged(struct user_namespace *user_ns, int cap);
 int smack_privileged(int cap);
 void smk_destroy_label_list(struct list_head *list);
 

@@ -629,14 +629,16 @@ LIST_HEAD(smack_onlycap_list);
 DEFINE_MUTEX(smack_onlycap_lock);
 
 /*
- * Is the task privileged and allowed to be privileged
- * by the onlycap rule.
+ * Internal smack capability check complimentary to the
+ * set of kernel capable() and has_capability() functions
  *
- * Returns 1 if the task is allowed to be privileged, 0 if it's not.
+ * For a capability in smack related checks to be effective it needs to:
+ * - be allowed to be privileged by the onlycap rule.
+ * - be in the initial user ns
  */
-int smack_privileged(int cap)
+static int smack_capability_allowed(struct smack_known *skp,
+				    struct user_namespace *user_ns)
 {
-	struct smack_known *skp = smk_of_current();
 	struct smack_known_list_elem *sklep;
 
 	/*
@@ -645,7 +647,7 @@ int smack_privileged(int cap)
 	if (unlikely(current->flags & PF_KTHREAD))
 		return 1;
 
-	if (!capable(cap))
+	if (user_ns != &init_user_ns)
 		return 0;
 
 	rcu_read_lock();
@@ -663,4 +665,54 @@ int smack_privileged(int cap)
 	rcu_read_unlock();
 
 	return 0;
+}
+
+/*
+ * Is the task privileged in a namespace and allowed to be privileged
+ * by additional smack rules.
+ */
+int smack_has_ns_privilege(struct task_struct *task,
+			   struct user_namespace *user_ns,
+			   int cap)
+{
+	struct smack_known *skp = smk_of_task_struct(task);
+
+	if (!has_ns_capability(task, user_ns, cap))
+		return 0;
+	if (smack_capability_allowed(skp, user_ns))
+		return 1;
+	return 0;
+}
+
+/*
+ * Is the task privileged and allowed to be privileged
+ * by additional smack rules.
+ */
+int smack_has_privilege(struct task_struct *task, int cap)
+{
+	return smack_has_ns_privilege(task, &init_user_ns, cap);
+}
+
+/*
+ * Is the current task privileged in a namespace and allowed to be privileged
+ * by additional smack rules.
+ */
+int smack_ns_privileged(struct user_namespace *user_ns, int cap)
+{
+	struct smack_known *skp = smk_of_current();
+
+	if (!ns_capable(user_ns, cap))
+		return 0;
+	if (smack_capability_allowed(skp, user_ns))
+		return 1;
+	return 0;
+}
+
+/*
+ * Is the current task privileged and allowed to be privileged
+ * by additional smack rules.
+ */
+int smack_privileged(int cap)
+{
+	return smack_ns_privileged(&init_user_ns, cap);
 }

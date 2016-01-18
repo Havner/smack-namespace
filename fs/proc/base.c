@@ -2454,7 +2454,7 @@ static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 	if (length < 0)
 		goto out_free;
 
-	length = security_setprocattr(task,
+	length = security_setprocattr(task, file->f_cred,
 				      (char*)file->f_path.dentry->d_name.name,
 				      (void*)page, count);
 	mutex_unlock(&task->signal->cred_guard_mutex);

@@ -3608,8 +3608,8 @@ static int smack_getprocattr(struct task_struct *p, char *name, char **value)
  *
  * Returns the length of the smack label or an error code
  */
-static int smack_setprocattr(struct task_struct *p, char *name,
-			     void *value, size_t size)
+static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
+			     char *name, void *value, size_t size)
 {
 	struct task_smack *tsp = current_security();
 	struct cred *new;

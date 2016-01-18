@@ -1121,6 +1121,12 @@ void security_d_instantiate(struct dentry *dentry, struct inode *inode)
 }
 EXPORT_SYMBOL(security_d_instantiate);
 
+int security_getprocattr_seq(struct task_struct *p, const char *name,
+			     const struct seq_operations **ops)
+{
+	return call_int_hook(getprocattr_seq, -EOPNOTSUPP, p, name, ops);
+}
+
 int security_getprocattr(struct task_struct *p, char *name, char **value)
 {
 	return call_int_hook(getprocattr, -EINVAL, p, name, value);
@@ -1774,6 +1780,8 @@ struct security_hook_heads security_hook_heads = {
 	.netlink_send =	LIST_HEAD_INIT(security_hook_heads.netlink_send),
 	.d_instantiate =
 		LIST_HEAD_INIT(security_hook_heads.d_instantiate),
+	.getprocattr_seq =
+		LIST_HEAD_INIT(security_hook_heads.getprocattr_seq),
 	.getprocattr =	LIST_HEAD_INIT(security_hook_heads.getprocattr),
 	.setprocattr =	LIST_HEAD_INIT(security_hook_heads.setprocattr),
 	.ismaclabel =	LIST_HEAD_INIT(security_hook_heads.ismaclabel),

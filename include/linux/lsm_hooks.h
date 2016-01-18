@@ -1208,6 +1208,18 @@
  *	@name full extended attribute name to check against
  *	LSM as a MAC label.
  *
+ * @getprocattr_seq:
+ *	An alternative to the getprocattr, that makes it possible for an attr
+ *	file to be handled by seq operations. If this function returns valid
+ *	@ops for a specific @name, those operations will be used and
+ *	getprocattr will not be called.
+ *	A proper task for the file is then passed in seq_file->private.
+ *	@p a task associated with the proc file.
+ *	@name name of the attr file under /proc/$PID/attr/ to be handled.
+ *	@ops (out) seq_operations to be used for @name.
+ *	Return 0 if @name is to be handled by seq, EOPNOTSUPP if getprocattr()
+ *	should be used. Other errors will be passed to user-space.
+ *
  * @secid_to_secctx:
  *	Convert secid to security context.  If secdata is NULL the length of
  *	the result will be returned in seclen, but no secdata will be returned.
@@ -1525,6 +1537,8 @@ union security_list_options {
 
 	void (*d_instantiate)(struct dentry *dentry, struct inode *inode);
 
+	int (*getprocattr_seq)(struct task_struct *p, const char *name,
+			       const struct seq_operations **ops);
 	int (*getprocattr)(struct task_struct *p, char *name, char **value);
 	int (*setprocattr)(struct task_struct *p, char *name, void *value,
 				size_t size);
@@ -1774,6 +1788,7 @@ struct security_hook_heads {
 	struct list_head sem_semop;
 	struct list_head netlink_send;
 	struct list_head d_instantiate;
+	struct list_head getprocattr_seq;
 	struct list_head getprocattr;
 	struct list_head setprocattr;
 	struct list_head ismaclabel;

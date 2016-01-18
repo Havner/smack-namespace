@@ -345,6 +345,8 @@ int security_sem_semctl(struct sem_array *sma, int cmd);
 int security_sem_semop(struct sem_array *sma, struct sembuf *sops,
 			unsigned nsops, int alter);
 void security_d_instantiate(struct dentry *dentry, struct inode *inode);
+int security_getprocattr_seq(struct task_struct *p, const char *name,
+			     const struct seq_operations **ops);
 int security_getprocattr(struct task_struct *p, char *name, char **value);
 int security_setprocattr(struct task_struct *p, char *name, void *value, size_t size);
 int security_netlink_send(struct sock *sk, struct sk_buff *skb);
@@ -1056,6 +1058,13 @@ static inline int security_sem_semop(struct sem_array *sma,
 
 static inline void security_d_instantiate(struct dentry *dentry, struct inode *inode)
 { }
+
+static inline int security_getprocattr_seq(struct task_struct *p,
+					   const char *name,
+					   const struct seq_operations **ops)
+{
+	return -EOPNOTSUPP;
+}
 
 static inline int security_getprocattr(struct task_struct *p, char *name, char **value)
 {

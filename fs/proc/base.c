@@ -2334,25 +2334,91 @@ out:
 }
 
 #ifdef CONFIG_SECURITY
-static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
-				  size_t count, loff_t *ppos)
+static int proc_pid_attr_open(struct inode *inode, struct file *file)
 {
-	struct inode * inode = file_inode(file);
-	char *p = NULL;
-	ssize_t length;
-	struct task_struct *task = get_proc_task(inode);
+	const char *name = file->f_path.dentry->d_name.name;
+	const struct seq_operations *ops;
+	struct task_struct *task;
+	struct seq_file *seq;
+	int ret;
 
+	file->private_data = NULL;
+
+	task = get_proc_task(inode);
 	if (!task)
 		return -ESRCH;
 
-	length = security_getprocattr(task,
-				      (char*)file->f_path.dentry->d_name.name,
-				      &p);
+	/* don't use seq_ops if they are not provided by LSM */
+	ret = security_getprocattr_seq(task, name, &ops);
+	if (ret == -EOPNOTSUPP) {
+		ret = 0;
+		goto put_task;
+	}
+	if (ret)
+		goto put_task;
+
+	ret = seq_open(file, ops);
+	if (ret)
+		goto put_task;
+
+	seq = file->private_data;
+	seq->private = task;
+
+	return 0;
+
+put_task:
+	put_task_struct(task);
+	return ret;
+}
+
+static int proc_pid_attr_release(struct inode *inode, struct file *file)
+{
+	struct seq_file *seq;
+	struct task_struct *task;
+
+	/* don't use seq_ops if they were not provided by LSM */
+	if (file->private_data == NULL)
+		return 0;
+
+	seq = file->private_data;
+	task = seq->private;
+	put_task_struct(task);
+
+	return seq_release(inode, file);
+}
+
+static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
+				  size_t count, loff_t *ppos)
+{
+	struct inode *inode = file_inode(file);
+	const char *name = file->f_path.dentry->d_name.name;
+	char *p = NULL;
+	ssize_t length;
+	struct task_struct *task;
+
+	/* use seq_ops if they were provided by LSM */
+	if (file->private_data)
+		return seq_read(file, buf, count, ppos);
+
+	task = get_proc_task(inode);
+	if (!task)
+		return -ESRCH;
+
+	length = security_getprocattr(task, (char *)name, &p);
 	put_task_struct(task);
 	if (length > 0)
 		length = simple_read_from_buffer(buf, count, ppos, p, length);
 	kfree(p);
 	return length;
+}
+
+static loff_t proc_pid_attr_lseek(struct file *file, loff_t offset, int whence)
+{
+	/* use seq_ops if they were provided by LSM */
+	if (file->private_data)
+		return seq_lseek(file, offset, whence);
+
+	return generic_file_llseek(file, offset, whence);
 }
 
 static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
@@ -2401,9 +2467,11 @@ out_no_task:
 }
 
 static const struct file_operations proc_pid_attr_operations = {
+	.open		= proc_pid_attr_open,
+	.release	= proc_pid_attr_release,
 	.read		= proc_pid_attr_read,
+	.llseek		= proc_pid_attr_lseek,
 	.write		= proc_pid_attr_write,
-	.llseek		= generic_file_llseek,
 };
 
 static const struct pid_entry attr_dir_stuff[] = {
@@ -2413,6 +2481,7 @@ static const struct pid_entry attr_dir_stuff[] = {
 	REG("fscreate",   S_IRUGO|S_IWUGO, proc_pid_attr_operations),
 	REG("keycreate",  S_IRUGO|S_IWUGO, proc_pid_attr_operations),
 	REG("sockcreate", S_IRUGO|S_IWUGO, proc_pid_attr_operations),
+	REG("label_map",  S_IRUGO|S_IWUGO, proc_pid_attr_operations),
 };
 
 static int proc_attr_dir_readdir(struct file *file, struct dir_context *ctx)

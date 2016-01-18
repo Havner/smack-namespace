@@ -776,31 +776,31 @@ static int smack_set_mnt_opts(struct super_block *sb,
 	for (i = 0; i < num_opts; i++) {
 		switch (opts->mnt_opts_flags[i]) {
 		case FSDEFAULT_MNT:
-			skp = smk_import_entry(opts->mnt_opts[i], 0);
+			skp = smk_get_label(opts->mnt_opts[i], 0, true);
 			if (IS_ERR(skp))
 				return PTR_ERR(skp);
 			sp->smk_default = skp;
 			break;
 		case FSFLOOR_MNT:
-			skp = smk_import_entry(opts->mnt_opts[i], 0);
+			skp = smk_get_label(opts->mnt_opts[i], 0, true);
 			if (IS_ERR(skp))
 				return PTR_ERR(skp);
 			sp->smk_floor = skp;
 			break;
 		case FSHAT_MNT:
-			skp = smk_import_entry(opts->mnt_opts[i], 0);
+			skp = smk_get_label(opts->mnt_opts[i], 0, true);
 			if (IS_ERR(skp))
 				return PTR_ERR(skp);
 			sp->smk_hat = skp;
 			break;
 		case FSROOT_MNT:
-			skp = smk_import_entry(opts->mnt_opts[i], 0);
+			skp = smk_get_label(opts->mnt_opts[i], 0, true);
 			if (IS_ERR(skp))
 				return PTR_ERR(skp);
 			sp->smk_root = skp;
 			break;
 		case FSTRANS_MNT:
-			skp = smk_import_entry(opts->mnt_opts[i], 0);
+			skp = smk_get_label(opts->mnt_opts[i], 0, true);
 			if (IS_ERR(skp))
 				return PTR_ERR(skp);
 			sp->smk_root = skp;
@@ -1318,7 +1318,7 @@ static int smack_inode_setxattr(struct dentry *dentry, const char *name,
 		rc = -EPERM;
 
 	if (rc == 0 && check_import) {
-		skp = size ? smk_import_entry(value, size) : NULL;
+		skp = size ? smk_get_label(value, size, true) : NULL;
 		if (IS_ERR(skp))
 			rc = PTR_ERR(skp);
 		else if (skp == NULL || (check_star &&
@@ -1352,6 +1352,7 @@ static void smack_inode_post_setxattr(struct dentry *dentry, const char *name,
 				      const void *value, size_t size, int flags)
 {
 	struct smack_known *skp;
+	struct smack_known **skpp = NULL;
 	struct inode_smack *isp = d_backing_inode(dentry)->i_security;
 
 	if (strcmp(name, XATTR_NAME_SMACKTRANSMUTE) == 0) {
@@ -1359,27 +1360,21 @@ static void smack_inode_post_setxattr(struct dentry *dentry, const char *name,
 		return;
 	}
 
-	if (strcmp(name, XATTR_NAME_SMACK) == 0) {
-		skp = smk_import_entry(value, size);
-		if (!IS_ERR(skp))
-			isp->smk_inode = skp;
-		else
-			isp->smk_inode = &smack_known_invalid;
-	} else if (strcmp(name, XATTR_NAME_SMACKEXEC) == 0) {
-		skp = smk_import_entry(value, size);
-		if (!IS_ERR(skp))
-			isp->smk_task = skp;
-		else
-			isp->smk_task = &smack_known_invalid;
-	} else if (strcmp(name, XATTR_NAME_SMACKMMAP) == 0) {
-		skp = smk_import_entry(value, size);
-		if (!IS_ERR(skp))
-			isp->smk_mmap = skp;
-		else
-			isp->smk_mmap = &smack_known_invalid;
-	}
+	if (strcmp(name, XATTR_NAME_SMACK) == 0)
+		skpp = &isp->smk_inode;
+	else if (strcmp(name, XATTR_NAME_SMACKEXEC) == 0)
+		skpp = &isp->smk_task;
+	else if (strcmp(name, XATTR_NAME_SMACKMMAP) == 0)
+		skpp = &isp->smk_mmap;
 
-	return;
+	if (skpp) {
+		skp = smk_get_label(value, size, true);
+
+		if (!IS_ERR(skp))
+			*skpp = skp;
+		else
+			*skpp = &smack_known_invalid;
+	}
 }
 
 /**
@@ -1473,15 +1468,17 @@ static int smack_inode_getsecurity(const struct inode *inode,
 	struct socket *sock;
 	struct super_block *sbp;
 	struct inode *ip = (struct inode *)inode;
-	struct smack_known *isp;
-	int ilen;
+	struct smack_known *isp = NULL;
 	int rc = 0;
 
-	if (strcmp(name, XATTR_SMACK_SUFFIX) == 0) {
+	if (strcmp(name, XATTR_SMACK_SUFFIX) == 0)
 		isp = smk_of_inode(inode);
-		ilen = strlen(isp->smk_known);
-		*buffer = isp->smk_known;
-		return ilen;
+
+	if (isp) {
+		*buffer = smk_find_label_name(isp);
+		if (*buffer == NULL)
+			*buffer = smack_known_huh.smk_known;
+		return strlen(*buffer);
 	}
 
 	/*
@@ -1504,10 +1501,11 @@ static int smack_inode_getsecurity(const struct inode *inode,
 	else
 		return -EOPNOTSUPP;
 
-	ilen = strlen(isp->smk_known);
 	if (rc == 0) {
-		*buffer = isp->smk_known;
-		rc = ilen;
+		*buffer = smk_find_label_name(isp);
+		if (*buffer == NULL)
+			*buffer = smack_known_huh.smk_known;
+		rc = strlen(*buffer);
 	}
 
 	return rc;
@@ -2717,7 +2715,7 @@ static int smack_inode_setsecurity(struct inode *inode, const char *name,
 	if (value == NULL || size > SMK_LONGLABEL || size == 0)
 		return -EINVAL;
 
-	skp = smk_import_entry(value, size);
+	skp = smk_get_label(value, size, true);
 	if (IS_ERR(skp))
 		return PTR_ERR(skp);
 
@@ -3587,7 +3585,10 @@ static int smack_getprocattr(struct task_struct *p, char *name, char **value)
 	if (strcmp(name, "current") != 0)
 		return -EINVAL;
 
-	cp = kstrdup(skp->smk_known, GFP_KERNEL);
+	cp = smk_find_label_name(skp);
+	if (cp == NULL)
+		cp = smack_known_huh.smk_known;
+	cp = kstrdup(cp, GFP_KERNEL);
 	if (cp == NULL)
 		return -ENOMEM;
 
@@ -3633,7 +3634,7 @@ static int smack_setprocattr(struct task_struct *p, const struct cred *f_cred,
 	if (strcmp(name, "current") != 0)
 		return -EINVAL;
 
-	skp = smk_import_entry(value, size);
+	skp = smk_get_label(value, size, true);
 	if (IS_ERR(skp))
 		return PTR_ERR(skp);
 
@@ -4387,7 +4388,10 @@ static int smack_key_getsecurity(struct key *key, char **_buffer)
 		return 0;
 	}
 
-	copy = kstrdup(skp->smk_known, GFP_KERNEL);
+	copy = smk_find_label_name(skp);
+	if (copy == NULL)
+		copy = smack_known_huh.smk_known;
+	copy = kstrdup(copy, GFP_KERNEL);
 	if (copy == NULL)
 		return -ENOMEM;
 	length = strlen(copy) + 1;

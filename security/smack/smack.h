@@ -308,6 +308,8 @@ int smack_has_privilege(struct task_struct *task, int cap);
 int smack_ns_privileged(struct user_namespace *user_ns, int cap);
 int smack_privileged(int cap);
 void smk_destroy_label_list(struct list_head *list);
+char *smk_find_label_name(struct smack_known *skp);
+struct smack_known *smk_get_label(const char *string, int len, bool import);
 
 /*
  * Shared data.

@@ -452,13 +452,16 @@ struct smack_known *smk_find_entry(const char *string)
 /**
  * smk_parse_smack - parse smack label from a text string
  * @string: a text string that might contain a Smack label
- * @len: the maximum size, or zero if it is NULL terminated.
+ * @len: the maximum size, or zero if it is NULL terminated
+ * @allocated: (out) indicates whether the return string has been
+ *             allocated and has to be freed with kfree() later
+ *             (built-in labels returned are not allocated)
  *
  * Returns a pointer to the clean label or an error code.
  */
-char *smk_parse_smack(const char *string, int len)
+char *smk_parse_smack(const char *string, int len, bool *allocated)
 {
-	char *smack;
+	char *smack = NULL;
 	int i;
 
 	if (len <= 0)
@@ -480,11 +483,33 @@ char *smk_parse_smack(const char *string, int len)
 	if (i == 0 || i >= SMK_LONGLABEL)
 		return ERR_PTR(-EINVAL);
 
+	/*
+	 * Look for special labels. This way we guarantee that we can compare
+	 * special labels in mapped entries by ==, without strcmp().
+	 */
+	if (len == 1 && !strcmp(string, smack_known_huh.smk_known))
+		smack = smack_known_huh.smk_known;
+	else if (len == 1 && !strcmp(string, smack_known_hat.smk_known))
+		smack = smack_known_hat.smk_known;
+	else if (len == 1 && !strcmp(string, smack_known_star.smk_known))
+		smack = smack_known_star.smk_known;
+	else if (len == 1 && !strcmp(string, smack_known_floor.smk_known))
+		smack = smack_known_floor.smk_known;
+	else if (len == 1 && !strcmp(string, smack_known_web.smk_known))
+		smack = smack_known_web.smk_known;
+
+	if (smack) {
+		*allocated = false;
+
+		return smack;
+	}
+
 	smack = kzalloc(i + 1, GFP_KERNEL);
 	if (smack == NULL)
 		return ERR_PTR(-ENOMEM);
 
 	strncpy(smack, string, i);
+	*allocated = true;
 
 	return smack;
 }
@@ -540,8 +565,9 @@ struct smack_known *smk_import_entry(const char *string, int len)
 	char *smack;
 	int slen;
 	int rc;
+	bool allocated;
 
-	smack = smk_parse_smack(string, len);
+	smack = smk_parse_smack(string, len, &allocated);
 	if (IS_ERR(smack))
 		return ERR_CAST(smack);
 
@@ -577,6 +603,10 @@ struct smack_known *smk_import_entry(const char *string, int len)
 	if (rc >= 0) {
 		INIT_LIST_HEAD(&skp->smk_rules);
 		mutex_init(&skp->smk_rules_lock);
+#ifdef CONFIG_SECURITY_SMACK_NS
+		INIT_LIST_HEAD(&skp->smk_mapped);
+		mutex_init(&skp->smk_mapped_lock);
+#endif /* CONFIG_SECURITY_SMACK_NS */
 		/*
 		 * Make sure that the entry is actually
 		 * filled before putting it on the list.
@@ -590,7 +620,8 @@ struct smack_known *smk_import_entry(const char *string, int len)
 	kfree(skp);
 	skp = ERR_PTR(rc);
 freeout:
-	kfree(smack);
+	if (allocated)
+		kfree(smack);
 unlockout:
 	mutex_unlock(&smack_known_lock);
 
@@ -748,17 +779,19 @@ char *smk_find_label_name(struct smack_known *skp)
 struct smack_known *smk_get_label(const char *string, int len, bool import)
 {
 	struct smack_known *skp;
+	bool allocated;
 	char *cp;
 
 	if (import) {
 		skp = smk_import_entry(string, len);
 	} else {
-		cp = smk_parse_smack(string, len);
+		cp = smk_parse_smack(string, len, &allocated);
 		if (IS_ERR(cp))
 			return ERR_CAST(cp);
 
 		skp = smk_find_entry(cp);
-		kfree(cp);
+		if (allocated)
+			kfree(cp);
 	}
 
 	return skp;

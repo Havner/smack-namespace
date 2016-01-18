@@ -2656,23 +2656,20 @@ static const struct file_operations smk_change_rule_ops = {
 static ssize_t smk_read_syslog(struct file *filp, char __user *buf,
 				size_t cn, loff_t *ppos)
 {
-	struct smack_known *skp;
+	char *smack = "";
 	ssize_t rc = -EINVAL;
 	int asize;
 
 	if (*ppos != 0)
 		return 0;
 
-	if (smack_syslog_label == NULL)
-		skp = &smack_known_star;
-	else
-		skp = smack_syslog_label;
+	if (smack_syslog_label != NULL)
+		smack = smack_syslog_label->smk_known;
 
-	asize = strlen(skp->smk_known) + 1;
+	asize = strlen(smack) + 1;
 
 	if (cn >= asize)
-		rc = simple_read_from_buffer(buf, cn, ppos, skp->smk_known,
-						asize);
+		rc = simple_read_from_buffer(buf, cn, ppos, smack, asize);
 
 	return rc;
 }
@@ -2700,16 +2697,31 @@ static ssize_t smk_write_syslog(struct file *file, const char __user *buf,
 	if (data == NULL)
 		return -ENOMEM;
 
-	if (copy_from_user(data, buf, count) != 0)
+	if (copy_from_user(data, buf, count) != 0) {
 		rc = -EFAULT;
-	else {
-		skp = smk_import_entry(data, count);
-		if (IS_ERR(skp))
-			rc = PTR_ERR(skp);
-		else
-			smack_syslog_label = skp;
+		goto freeout;
 	}
 
+	/*
+	 * Clear the smack_syslog_label on invalid label errors. This means
+	 * that we can pass a null string to unset the syslog value.
+	 *
+	 * Importing will also reject a label beginning with '-',
+	 * so "-syslog" will also work.
+	 *
+	 * But do so only on invalid label, not on system errors.
+	 */
+	skp = smk_import_entry(data, count);
+	if (PTR_ERR(skp) == -EINVAL)
+		skp = NULL;
+	else if (IS_ERR(skp)) {
+		rc = PTR_ERR(skp);
+		goto freeout;
+	}
+
+	smack_syslog_label = skp;
+
+freeout:
 	kfree(data);
 	return rc;
 }
